@@ -1,0 +1,6 @@
+# Keep Linux line endings so the app builds correctly even when committed from Windows.
+# (Applies only inside this folder, so it does not affect the rest of your repository.)
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf

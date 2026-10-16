@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sensor Statistics</title>
+<style>
+  :root {
+    --background: #f4f5f7;
+    --surface: #ffffff;
+    --text: #1d2330;
+    --text-muted: #667085;
+    --border: #e1e4ea;
+    --series-a: #2563eb;
+    --series-b: #ea7a0b;
+    --grid: rgba(0, 0, 0, 0.07);
+    --error-background: #fdecea;
+    --error-text: #8a1c14;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #111418;
+      --surface: #1b2027;
+      --text: #e8ebf0;
+      --text-muted: #98a2b3;
+      --border: #2b323c;
+      --series-a: #5b9bff;
+      --series-b: #ffa24d;
+      --grid: rgba(255, 255, 255, 0.08);
+      --error-background: #3a1b18;
+      --error-text: #ffb4ab;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--background);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  main { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--text-muted); font-size: 12px; }
+  select, input[type="text"] {
+    font: inherit;
+    color: var(--text);
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 8px;
+    min-width: 0;
+  }
+  label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; padding-bottom: 7px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card-title { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; margin-bottom: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .big-value { font-size: 28px; font-weight: 600; line-height: 1.1; }
+  .big-label { color: var(--text-muted); font-size: 12px; margin-bottom: 8px; }
+  .detail-row { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-top: 1px solid var(--border); }
+  .detail-row span:first-child { color: var(--text-muted); }
+  .detail-row span:last-child { text-align: right; }
+  .chart-wrapper { position: relative; height: 420px; }
+  .status { color: var(--text-muted); font-size: 12px; margin-top: 8px; min-height: 1.4em; }
+  .error { background: var(--error-background); color: var(--error-text); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+  .hidden { display: none; }
+  .table-wrapper { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+  th.group { text-align: center; color: var(--text); border-bottom: 2px solid var(--border); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sensor Statistics</h1>
+
+  <section class="panel">
+    <div class="controls">
+      <label>Filter sensors
+        <input type="text" id="sensor-filter" placeholder="e.g. temperature">
+      </label>
+      <label>Sensor
+        <select id="sensor-a"></select>
+      </label>
+      <label>Compare with
+        <select id="sensor-b"></select>
+      </label>
+      <label>Range
+        <select id="range-days">
+          <option value="1">Last 24 hours</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365" selected>Last year</option>
+          <option value="730">Last 2 years</option>
+          <option value="1825">Last 5 years</option>
+        </select>
+      </label>
+      <label>Resolution
+        <select id="resolution">
+          <option value="auto" selected>Auto</option>
+          <option value="hour">Hourly</option>
+          <option value="day">Daily</option>
+          <option value="week">Weekly</option>
+          <option value="month">Monthly</option>
+        </select>
+      </label>
+      <label class="checkbox"><input type="checkbox" id="show-band" checked> Show min/max band</label>
+    </div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <div class="error hidden" id="error-banner"></div>
+
+  <section class="cards" id="summary-cards"></section>
+
+  <section class="panel" id="chart-panel">
+    <div class="chart-wrapper"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section class="panel hidden" id="monthly-panel">
+    <h2>Monthly breakdown</h2>
+    <div class="table-wrapper"><table id="monthly-table"></table></div>
+  </section>
+</main>
+
+<script src="static/chart.umd.js"></script>
+<script>
+"use strict";
+
+const MILLISECONDS_PER_DAY = 86400000;
+const MINIMUM_DAYS_FOR_MONTHLY_TABLE = 60;
+const STORAGE_KEY = "sensor_statistics_selection";
+
+const state = {
+  sensor_list: [],
+  chart: null,
+  request_counter: 0,
+  last_render: null
+};
+
+const element = {
+  sensor_filter: document.getElementById("sensor-filter"),
+  sensor_a: document.getElementById("sensor-a"),
+  sensor_b: document.getElementById("sensor-b"),
+  range_days: document.getElementById("range-days"),
+  resolution: document.getElementById("resolution"),
+  show_band: document.getElementById("show-band"),
+  status: document.getElementById("status"),
+  error_banner: document.getElementById("error-banner"),
+  summary_cards: document.getElementById("summary-cards"),
+  chart_panel: document.getElementById("chart-panel"),
+  monthly_panel: document.getElementById("monthly-panel"),
+  monthly_table: document.getElementById("monthly-table"),
+  chart_canvas: document.getElementById("chart")
+};
+
+// ---------------------------------------------------------------- helpers
+
+function CreateElement(tag_name, class_name, text_content) {
+  const new_element = document.createElement(tag_name);
+  if (class_name) {
+    new_element.className = class_name;
+  }
+  if (text_content !== undefined && text_content !== null) {
+    new_element.textContent = text_content;
+  }
+  return new_element;
+}
+
+async function FetchJson(relative_url) {
+  const response = await fetch(relative_url);
+  let body = {};
+  try {
+    body = await response.json();
+  } catch (error) {
+    body = {};
+  }
+  if (!response.ok) {
+    throw new Error(body.error || ("HTTP " + response.status));
+  }
+  return body;
+}
+
+function FormatNumber(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "–";
+  }
+  const absolute_value = Math.abs(value);
+  const decimal_count = absolute_value >= 1000 ? 0 : (absolute_value >= 1 ? 1 : 2);
+  return value.toFixed(decimal_count);
+}
+
+function FormatValue(value, unit) {
+  const number_text = FormatNumber(value);
+  if (number_text === "–" || !unit) {
+    return number_text;
+  }
+  return number_text + " " + unit;
+}
+
+function FormatDate(time_ms, period) {
+  const date = new Date(time_ms);
+  if (period === "month") {
+    return date.toLocaleDateString(undefined, {month: "short", year: "numeric"});
+  }
+  if (period === "hour" || period === "5minute") {
+    return date.toLocaleDateString(undefined, {day: "numeric", month: "short"}) + " " +
+        date.toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"});
+  }
+  return date.toLocaleDateString(undefined, {day: "numeric", month: "short", year: "numeric"});
+}
+
+function ToRgba(hex_color, alpha) {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex_color);
+  if (!match) {
+    return hex_color;
+  }
+  return "rgba(" + parseInt(match[1], 16) + "," + parseInt(match[2], 16) + "," +
+      parseInt(match[3], 16) + "," + alpha + ")";
+}
+
+function CssVariable(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function ResolvePeriod(range_days) {
+  if (element.resolution.value !== "auto") {
+    return element.resolution.value;
+  }
+  if (range_days <= 14) {
+    return "hour";
+  }
+  if (range_days <= 400) {
+    return "day";
+  }
+  return "week";
+}
+
+function SetStatus(message) {
+  element.status.textContent = message;
+}
+
+function ShowError(message) {
+  element.error_banner.textContent = message;
+  element.error_banner.classList.toggle("hidden", !message);
+}
+
+// ---------------------------------------------------------------- data
+
+function NormalizePoints(raw_point_list) {
+  const point_list = [];
+  for (const raw_point of (raw_point_list || [])) {
+    if (raw_point.mean === null || raw_point.mean === undefined) {
+      continue;
+    }
+    const time_ms = typeof raw_point.start === "number" ? raw_point.start : Date.parse(raw_point.start);
+    point_list.push({
+      time_ms: time_ms,
+      mean: raw_point.mean,
+      min: raw_point.min === null || raw_point.min === undefined ? raw_point.mean : raw_point.min,
+      max: raw_point.max === null || raw_point.max === undefined ? raw_point.mean : raw_point.max
+    });
+  }
+  point_list.sort(function(first, second) { return first.time_ms - second.time_ms; });
+  return point_list;
+}
+
+function ComputeSummary(point_list) {
+  if (point_list.length === 0) {
+    return null;
+  }
+  let sum_of_means = 0;
+  let lowest = point_list[0];
+  let highest = point_list[0];
+  for (const point of point_list) {
+    sum_of_means += point.mean;
+    if (point.min < lowest.min) {
+      lowest = point;
+    }
+    if (point.max > highest.max) {
+      highest = point;
+    }
+  }
+  return {
+    average: sum_of_means / point_list.length,
+    minimum: lowest.min,
+    minimum_time: lowest.time_ms,
+    maximum: highest.max,
+    maximum_time: highest.time_ms,
+    point_count: point_list.length
+  };
+}
+
+function ComputeComparison(first_point_list, second_point_list) {
+  const second_by_time = new Map();
+  for (const point of second_point_list) {
+    second_by_time.set(point.time_ms, point);
+  }
+  const pair_list = [];
+  for (const first_point of first_point_list) {
+    const second_point = second_by_time.get(first_point.time_ms);
+    if (second_point) {
+      pair_list.push({time_ms: first_point.time_ms, first: first_point.mean, second: second_point.mean});
+    }
+  }
+  if (pair_list.length === 0) {
+    return null;
+  }
+
+  let sum_first = 0;
+  let sum_second = 0;
+  let largest_difference = pair_list[0];
+  for (const pair of pair_list) {
+    sum_first += pair.first;
+    sum_second += pair.second;
+    if (Math.abs(pair.first - pair.second) > Math.abs(largest_difference.first - largest_difference.second)) {
+      largest_difference = pair;
+    }
+  }
+  const mean_first = sum_first / pair_list.length;
+  const mean_second = sum_second / pair_list.length;
+
+  let covariance = 0;
+  let variance_first = 0;
+  let variance_second = 0;
+  for (const pair of pair_list) {
+    covariance += (pair.first - mean_first) * (pair.second - mean_second);
+    variance_first += Math.pow(pair.first - mean_first, 2);
+    variance_second += Math.pow(pair.second - mean_second, 2);
+  }
+  let correlation = null;
+  if (pair_list.length >= 3 && variance_first > 0 && variance_second > 0) {
+    correlation = covariance / Math.sqrt(variance_first * variance_second);
+  }
+
+  return {
+    pair_count: pair_list.length,
+    average_difference: mean_first - mean_second,
+    largest_difference: largest_difference.first - largest_difference.second,
+    largest_difference_time: largest_difference.time_ms,
+    correlation: correlation
+  };
+}
+
+// ---------------------------------------------------------------- rendering
+
+function AddDetailRow(parent_element, label_text, value_text) {
+  const row = CreateElement("div", "detail-row");
+  row.appendChild(CreateElement("span", null, label_text));
+  row.appendChild(CreateElement("span", null, value_text));
+  parent_element.appendChild(row);
+}
+
+function BuildSeriesCard(series, period) {
+  const card = CreateElement("div", "card");
+  const title = CreateElement("div", "card-title");
+  const dot = CreateElement("span", "dot");
+  dot.style.background = series.color;
+  title.appendChild(dot);
+  title.appendChild(CreateElement("span", null, series.name));
+  card.appendChild(title);
+
+  if (!series.summary) {
+    card.appendChild(CreateElement("div", "big-label", "No data in this range"));
+    return card;
+  }
+  card.appendChild(CreateElement("div", "big-value", FormatValue(series.summary.average, series.unit)));
+  card.appendChild(CreateElement("div", "big-label", "Average"));
+  AddDetailRow(card, "Lowest", FormatValue(series.summary.minimum, series.unit) + " · " +
+      FormatDate(series.summary.minimum_time, period));
+  AddDetailRow(card, "Highest", FormatValue(series.summary.maximum, series.unit) + " · " +
+      FormatDate(series.summary.maximum_time, period));
+  AddDetailRow(card, "Data points", String(series.summary.point_count));
+  return card;
+}
+
+function BuildComparisonCard(series_list, comparison, period) {
+  const card = CreateElement("div", "card");
+  card.appendChild(CreateElement("div", "card-title", "Difference (first − second)"));
+  if (!comparison) {
+    card.appendChild(CreateElement("div", "big-label", "The sensors have no overlapping data"));
+    return card;
+  }
+  const same_unit = series_list[0].unit === series_list[1].unit;
+  if (same_unit) {
+    card.appendChild(CreateElement("div", "big-value", FormatValue(comparison.average_difference, series_list[0].unit)));
+    card.appendChild(CreateElement("div", "big-label", "Average difference"));
+    AddDetailRow(card, "Largest gap", FormatValue(comparison.largest_difference, series_list[0].unit) + " · " +
+        FormatDate(comparison.largest_difference_time, period));
+  } else {
+    card.appendChild(CreateElement("div", "big-label", "Units differ, so differences are not shown"));
+  }
+  AddDetailRow(card, "Correlation", comparison.correlation === null ? "–" : comparison.correlation.toFixed(2));
+  AddDetailRow(card, "Overlapping points", String(comparison.pair_count));
+  return card;
+}
+
+function BuildChart(series_list, period) {
+  if (state.chart) {
+    state.chart.destroy();
+    state.chart = null;
+  }
+
+  const text_color = CssVariable("--text-muted");
+  const grid_color = CssVariable("--grid");
+  const time_set = new Set();
+  for (const series of series_list) {
+    for (const point of series.point_list) {
+      time_set.add(point.time_ms);
+    }
+  }
+  const time_list = Array.from(time_set).sort(function(first, second) { return first - second; });
+  const label_list = time_list.map(function(time_ms) { return FormatDate(time_ms, period); });
+  const show_band = element.show_band.checked;
+  const same_unit = series_list.length < 2 || series_list[0].unit === series_list[1].unit;
+
+  const dataset_list = [];
+  series_list.forEach(function(series, series_index) {
+    const axis_id = (series_index === 1 && !same_unit) ? "y1" : "y";
+    const point_by_time = new Map();
+    for (const point of series.point_list) {
+      point_by_time.set(point.time_ms, point);
+    }
+    function ValuesFor(field_name) {
+      return time_list.map(function(time_ms) {
+        const point = point_by_time.get(time_ms);
+        return point ? point[field_name] : null;
+      });
+    }
+
+    dataset_list.push({
+      label: series.name,
+      data: ValuesFor("mean"),
+      borderColor: series.color,
+      backgroundColor: series.color,
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHitRadius: 8,
+      tension: 0.2,
+      spanGaps: false,
+      yAxisID: axis_id,
+      series_unit: series.unit
+    });
+    if (show_band) {
+      dataset_list.push({
+        label: series.name + " (min)",
+        data: ValuesFor("min"),
+        borderWidth: 0,
+        pointRadius: 0,
+        pointHitRadius: 0,
+        fill: false,
+        yAxisID: axis_id,
+        is_band: true,
+        series_unit: series.unit
+      });
+      dataset_list.push({
+        label: series.name + " (max)",
+        data: ValuesFor("max"),
+        borderWidth: 0,
+        pointRadius: 0,
+        pointHitRadius: 0,
+        fill: "-1",
+        backgroundColor: ToRgba(series.color, 0.15),
+        yAxisID: axis_id,
+        is_band: true,
+        series_unit: series.unit
+      });
+    }
+  });
+
+  function AxisOptions(unit, position, draw_grid) {
+    return {
+      position: position,
+      title: {display: Boolean(unit), text: unit, color: text_color},
+      ticks: {color: text_color},
+      grid: {color: grid_color, drawOnChartArea: draw_grid}
+    };
+  }
+
+  const scale_options = {
+    x: {
+      ticks: {color: text_color, maxTicksLimit: 10, maxRotation: 0, autoSkip: true},
+      grid: {color: grid_color}
+    },
+    y: AxisOptions(series_list[0].unit, "left", true)
+  };
+  if (!same_unit) {
+    scale_options.y1 = AxisOptions(series_list[1].unit, "right", false);
+  }
+
+  state.chart = new Chart(element.chart_canvas, {
+    type: "line",
+    data: {labels: label_list, datasets: dataset_list},
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: {mode: "index", intersect: false},
+      scales: scale_options,
+      plugins: {
+        legend: {
+          labels: {
+            color: text_color,
+            filter: function(legend_item, chart_data) {
+              return !chart_data.datasets[legend_item.datasetIndex].is_band;
+            }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              if (context.parsed.y === null) {
+                return null;
+              }
+              return context.dataset.label + ": " + FormatValue(context.parsed.y, context.dataset.series_unit);
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function BuildMonthlyTable(series_list, monthly_result) {
+  const table = element.monthly_table;
+  table.textContent = "";
+
+  const month_series_list = series_list.map(function(series) {
+    return {
+      series: series,
+      point_by_time: new Map(NormalizePoints(monthly_result[series.id]).map(function(point) {
+        return [point.time_ms, point];
+      }))
+    };
+  });
+  const time_set = new Set();
+  for (const month_series of month_series_list) {
+    for (const time_ms of month_series.point_by_time.keys()) {
+      time_set.add(time_ms);
+    }
+  }
+  const time_list = Array.from(time_set).sort(function(first, second) { return first - second; });
+  if (time_list.length === 0) {
+    return false;
+  }
+
+  const show_difference = series_list.length === 2 && series_list[0].unit === series_list[1].unit;
+
+  const group_row = CreateElement("tr");
+  group_row.appendChild(CreateElement("th"));
+  for (const month_series of month_series_list) {
+    const group_cell = CreateElement("th", "group", month_series.series.name);
+    group_cell.colSpan = 3;
+    group_cell.style.borderBottomColor = month_series.series.color;
+    group_row.appendChild(group_cell);
+  }
+  if (show_difference) {
+    group_row.appendChild(CreateElement("th", "group", "Difference"));
+  }
+
+  const header_row = CreateElement("tr");
+  header_row.appendChild(CreateElement("th", null, "Month"));
+  for (let index = 0; index < month_series_list.length; index += 1) {
+    header_row.appendChild(CreateElement("th", null, "Average"));
+    header_row.appendChild(CreateElement("th", null, "Min"));
+    header_row.appendChild(CreateElement("th", null, "Max"));
+  }
+  if (show_difference) {
+    header_row.appendChild(CreateElement("th", null, "Average"));
+  }
+
+  const head = CreateElement("thead");
+  if (month_series_list.length > 1) {
+    head.appendChild(group_row);
+  }
+  head.appendChild(header_row);
+  table.appendChild(head);
+
+  const body = CreateElement("tbody");
+  for (const time_ms of time_list) {
+    const row = CreateElement("tr");
+    row.appendChild(CreateElement("td", null, FormatDate(time_ms, "month")));
+    for (const month_series of month_series_list) {
+      const point = month_series.point_by_time.get(time_ms);
+      const unit = month_series.series.unit;
+      row.appendChild(CreateElement("td", null, point ? FormatValue(point.mean, unit) : "–"));
+      row.appendChild(CreateElement("td", null, point ? FormatValue(point.min, unit) : "–"));
+      row.appendChild(CreateElement("td", null, point ? FormatValue(point.max, unit) : "–"));
+    }
+    if (show_difference) {
+      const first_point = month_series_list[0].point_by_time.get(time_ms);
+      const second_point = month_series_list[1].point_by_time.get(time_ms);
+      const difference_text = (first_point && second_point)
+          ? FormatValue(first_point.mean - second_point.mean, series_list[0].unit)
+          : "–";
+      row.appendChild(CreateElement("td", null, difference_text));
+    }
+    body.appendChild(row);
+  }
+  table.appendChild(body);
+  return true;
+}
+
+function RenderResult(render_data) {
+  state.last_render = render_data;
+  const series_list = render_data.series_list;
+  const period = render_data.period;
+
+  element.summary_cards.textContent = "";
+  for (const series of series_list) {
+    element.summary_cards.appendChild(BuildSeriesCard(series, period));
+  }
+  if (series_list.length === 2) {
+    const comparison = ComputeComparison(series_list[0].point_list, series_list[1].point_list);
+    element.summary_cards.appendChild(BuildComparisonCard(series_list, comparison, period));
+  }
+
+  const has_data = series_list.some(function(series) { return series.point_list.length > 0; });
+  element.chart_panel.classList.toggle("hidden", !has_data);
+  if (has_data) {
+    BuildChart(series_list, period);
+  } else if (state.chart) {
+    state.chart.destroy();
+    state.chart = null;
+  }
+
+  let show_monthly = false;
+  if (render_data.monthly_result) {
+    show_monthly = BuildMonthlyTable(series_list, render_data.monthly_result);
+  }
+  element.monthly_panel.classList.toggle("hidden", !show_monthly);
+
+  const point_total = series_list.reduce(function(total, series) { return total + series.point_list.length; }, 0);
+  SetStatus(has_data
+      ? point_total + " data points · " + render_data.period_label + " resolution"
+      : "No long-term statistics found in this range.");
+}
+
+// ---------------------------------------------------------------- loading
+
+function BuildStatisticsUrl(id_list, start_date, period) {
+  return "api/statistics?ids=" + encodeURIComponent(id_list.join(",")) +
+      "&start=" + encodeURIComponent(start_date.toISOString()) +
+      "&period=" + encodeURIComponent(period);
+}
+
+async function Refresh() {
+  const sensor_a_id = element.sensor_a.value;
+  const sensor_b_id = element.sensor_b.value;
+  if (!sensor_a_id) {
+    return;
+  }
+  SaveSelection();
+
+  const id_list = (sensor_b_id && sensor_b_id !== sensor_a_id) ? [sensor_a_id, sensor_b_id] : [sensor_a_id];
+  const range_days = Number(element.range_days.value);
+  const start_date = new Date(Date.now() - range_days * MILLISECONDS_PER_DAY);
+  const period = ResolvePeriod(range_days);
+  const request_id = ++state.request_counter;
+
+  SetStatus("Loading…");
+  ShowError("");
+  try {
+    const detail_promise = FetchJson(BuildStatisticsUrl(id_list, start_date, period));
+    let monthly_promise = null;
+    if (range_days >= MINIMUM_DAYS_FOR_MONTHLY_TABLE) {
+      const month_start = new Date(start_date.getFullYear(), start_date.getMonth(), 1);
+      monthly_promise = FetchJson(BuildStatisticsUrl(id_list, month_start, "month"));
+    }
+    const detail_result = await detail_promise;
+    const monthly_result = monthly_promise ? await monthly_promise : null;
+    if (request_id !== state.request_counter) {
+      return;
+    }
+
+    const series_list = id_list.map(function(sensor_id, series_index) {
+      const sensor = state.sensor_list.find(function(candidate) { return candidate.id === sensor_id; });
+      const point_list = NormalizePoints(detail_result[sensor_id]);
+      return {
+        id: sensor_id,
+        name: sensor ? sensor.name : sensor_id,
+        unit: sensor ? sensor.unit : "",
+        color: CssVariable(series_index === 0 ? "--series-a" : "--series-b"),
+        point_list: point_list,
+        summary: ComputeSummary(point_list)
+      };
+    });
+    const period_labels = {"5minute": "5-minute", hour: "hourly", day: "daily", week: "weekly", month: "monthly"};
+    RenderResult({
+      series_list: series_list,
+      period: period,
+      period_label: period_labels[period],
+      monthly_result: monthly_result
+    });
+  } catch (error) {
+    if (request_id !== state.request_counter) {
+      return;
+    }
+    SetStatus("");
+    ShowError("Could not load statistics: " + error.message);
+  }
+}
+
+// ---------------------------------------------------------------- selection
+
+function SaveSelection() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      sensor_a: element.sensor_a.value,
+      sensor_b: element.sensor_b.value,
+      range_days: element.range_days.value,
+      resolution: element.resolution.value,
+      show_band: element.show_band.checked
+    }));
+  } catch (error) {
+    // Storage can be unavailable in embedded frames; the selection simply is not remembered.
+  }
+}
+
+function LoadSelection() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function PopulateSelect(select_element, include_none, selected_id) {
+  const filter_text = element.sensor_filter.value.trim().toLowerCase();
+  select_element.textContent = "";
+  if (include_none) {
+    const none_option = CreateElement("option", null, "None");
+    none_option.value = "";
+    select_element.appendChild(none_option);
+  }
+  for (const sensor of state.sensor_list) {
+    const matches = !filter_text ||
+        sensor.name.toLowerCase().includes(filter_text) ||
+        sensor.id.toLowerCase().includes(filter_text);
+    if (!matches && sensor.id !== selected_id) {
+      continue;
+    }
+    const option = CreateElement("option", null, sensor.name + (sensor.unit ? " (" + sensor.unit + ")" : ""));
+    option.value = sensor.id;
+    select_element.appendChild(option);
+  }
+  select_element.value = selected_id || "";
+}
+
+function OnFilterChanged() {
+  PopulateSelect(element.sensor_a, false, element.sensor_a.value);
+  PopulateSelect(element.sensor_b, true, element.sensor_b.value);
+}
+
+async function Start() {
+  const saved_selection = LoadSelection();
+  if (saved_selection.range_days) {
+    element.range_days.value = saved_selection.range_days;
+  }
+  if (saved_selection.resolution) {
+    element.resolution.value = saved_selection.resolution;
+  }
+  if (typeof saved_selection.show_band === "boolean") {
+    element.show_band.checked = saved_selection.show_band;
+  }
+
+  SetStatus("Loading sensors…");
+  try {
+    state.sensor_list = await FetchJson("api/sensors");
+  } catch (error) {
+    SetStatus("");
+    ShowError("Could not load the sensor list: " + error.message);
+    return;
+  }
+  if (state.sensor_list.length === 0) {
+    SetStatus("");
+    ShowError("No sensors with long-term statistics were found. Sensors need a state_class such as " +
+        "measurement to be included.");
+    return;
+  }
+
+  const saved_exists = state.sensor_list.some(function(sensor) { return sensor.id === saved_selection.sensor_a; });
+  let default_sensor = state.sensor_list.find(function(sensor) { return sensor.id.includes("temperature"); });
+  if (!default_sensor) {
+    default_sensor = state.sensor_list[0];
+  }
+  const sensor_a_id = saved_exists ? saved_selection.sensor_a : default_sensor.id;
+  const saved_b_exists = state.sensor_list.some(function(sensor) { return sensor.id === saved_selection.sensor_b; });
+
+  PopulateSelect(element.sensor_a, false, sensor_a_id);
+  PopulateSelect(element.sensor_b, true, saved_b_exists ? saved_selection.sensor_b : "");
+
+  element.sensor_filter.addEventListener("input", OnFilterChanged);
+  for (const control of [element.sensor_a, element.sensor_b, element.range_days, element.resolution]) {
+    control.addEventListener("change", Refresh);
+  }
+  element.show_band.addEventListener("change", function() {
+    if (state.last_render) {
+      BuildChart(state.last_render.series_list, state.last_render.period);
+    }
+    SaveSelection();
+  });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function() {
+    if (state.last_render) {
+      for (let index = 0; index < state.last_render.series_list.length; index += 1) {
+        state.last_render.series_list[index].color = CssVariable(index === 0 ? "--series-a" : "--series-b");
+      }
+      RenderResult(state.last_render);
+    }
+  });
+
+  await Refresh();
+}
+
+Start();
+</script>
+</body>
+</html>
